@@ -75,7 +75,7 @@ u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z-0.5)**2/0.01)
 u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z+0.5)**2/0.01)
 
 # Analysis
-snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=0.1, max_writes=10)
+snapshots = solver.evaluator.add_file_handler('snapshots', sim_dt=0.1, max_writes=1)
 snapshots.add_task(s, name='tracer')
 snapshots.add_task(p, name='pressure')
 snapshots.add_task(-d3.div(d3.skew(u)), name='vorticity')

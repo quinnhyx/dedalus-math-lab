@@ -7,7 +7,7 @@ from mpi4py import MPI
 # -------------------------
 Lx = 2*np.pi
 Ly = 2*np.pi
-Nx = Ny = 512
+Nx = Ny = 128
 beta = 1.0 
 dealias = 3/2
 

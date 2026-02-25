@@ -5,16 +5,16 @@ logger = logging.getLogger(__name__)
 
 # Parameters
 Lx, Lz = 4, 1
-Nx, Nz = 128, 256
-# Nx, Nz = 256, 64
-Reynolds = 5e4
+# Nx, Nz = 128, 256
+Nx, Nz = 256, 64
+Reynolds = 500
 Schmidt = 1
 dealias = 3/2
-stop_sim_time = 10
+stop_sim_time = 20
 timestepper = d3.RK222
 max_timestep = 1e-2
 dtype = np.float64
-A = 1.0
+A = 1
 
 # Bases
 coords = d3.CartesianCoordinates('x', 'z')
@@ -70,7 +70,8 @@ solver.stop_sim_time = stop_sim_time
 
 # Initial conditions
 # Background shear matching no-slip walls at z = ±Lz/2
-u['g'][0] = A * np.sin(np.pi * (z + Lz/2) / Lz)  # u_x(z)
+# u['g'][0] = A * np.sin(np.pi * (z + Lz/2) / Lz)  # u_x(z)
+u['g'][0] = np.tanh(z / 0.05)
 u['g'][1] = 0
 s['g'] = u['g'][0]
 u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z-0.5)**2/0.01)

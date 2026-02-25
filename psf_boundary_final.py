@@ -12,14 +12,14 @@ logging.basicConfig(level=logging.INFO)
 # ========================
 Lx, Lz = 4, 1
 Nx, Nz = 256, 64
-Reynolds = 1
+Reynolds = 500
 Schmidt = 1
 dealias = 3/2
-stop_sim_time = 5
+stop_sim_time = 20
 timestepper = d3.RK222
 max_timestep = 1e-2
 dtype = np.float64
-A = 1.0
+A = 1
 
 nu = 1 / Reynolds
 D  = nu / Schmidt
@@ -149,13 +149,13 @@ u['g'][1] = 0.0
 s['g'] = u['g'][0]
 
 # Interior perturbations to u_z
-u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z-0.25)**2/0.01)
-u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z+0.25)**2/0.01)
+u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z-0.5)**2/0.01)
+u['g'][1] += 0.1 * np.sin(2*np.pi*x/Lx) * np.exp(-(z+0.5)**2/0.01)
 
 # ========================
 # Analysis / output
 # ========================
-snapshots = solver.evaluator.add_file_handler('snapshots-channel', sim_dt=0.1, max_writes=50)
+snapshots = solver.evaluator.add_file_handler('snapshots-channel', sim_dt=0.1, max_writes=1)
 snapshots.add_task(s, name='tracer')
 snapshots.add_task(p, name='pressure')
 snapshots.add_task(u@ex, name='u_x')

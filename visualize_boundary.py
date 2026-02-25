@@ -5,17 +5,29 @@ from matplotlib.animation import FuncAnimation
 import glob
 import natsort
 
-files = natsort.natsorted(glob.glob("snapshots-boundary/*.h5"))
+files = natsort.natsorted(glob.glob("snapshots-channel/*.h5"))
+# files = natsort.natsorted(glob.glob("snapshots-boundary/*.h5"))
 
 tracer_list = []
 pressure_list = []
 vorticity_list = []
 
+# for file in files:
+#     with h5py.File(file, 'r') as f:
+#         tracer_list.append(f['tasks']['tracer'][0,:,:])
+#         pressure_list.append(f['tasks']['pressure'][0,:,:])
+#         vorticity_list.append(f['tasks']['vorticity'][0,:,:])
+
 for file in files:
     with h5py.File(file, 'r') as f:
-        tracer_list.append(f['tasks']['tracer'][0,:,:])
-        pressure_list.append(f['tasks']['pressure'][0,:,:])
-        vorticity_list.append(f['tasks']['vorticity'][0,:,:])
+        tracer_data = f['tasks']['tracer'][:]
+        pressure_data = f['tasks']['pressure'][:]
+        vorticity_data = f['tasks']['vorticity'][:]
+
+        for i in range(tracer_data.shape[0]):
+            tracer_list.append(tracer_data[i,:,:])
+            pressure_list.append(pressure_data[i,:,:])
+            vorticity_list.append(vorticity_data[i,:,:])
 
 Nz, Nx = tracer_list[0].shape
 n_snap = len(files)
@@ -51,5 +63,6 @@ interval = 1000 * t_total / n_snap  # 毫秒
 anim = FuncAnimation(fig, update, frames=n_snap, interval=interval, blit=False)
 
 fps = n_snap / t_total
-anim.save('shear_flow_boundary_animation.mp4', fps=fps, dpi=150)
+anim.save('shear_flow_boundary_final_animation.mp4', fps=fps, dpi=150)
+# anim.save('shear_flow_boundary_animation.mp4', fps=fps, dpi=150)
 plt.show()

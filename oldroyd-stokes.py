@@ -5,12 +5,20 @@ from mpi4py import MPI
 # -------------------------
 # Parameters
 # -------------------------
-Lx = 2*np.pi
-Ly = 2*np.pi
-Nx = Ny = 128
-beta = 1.0 
+# Lx = 2*np.pi
+# Ly = 2*np.pi
+# Nx = Ny = 128
+# beta = 1.0 
+# dealias = 3/2
+# Reynolds = 100.0
+# nu = 1 / Reynolds
+lenfactor = 4. 
+Ly = np.pi/2
+Lx = lenfactor*Ly
+Ny = 128
+Nx = 128
 dealias = 3/2
-Reynolds = 100.0
+Reynolds = 1
 nu = 1 / Reynolds
 
 # Linear conformation stepping-stone params
@@ -91,16 +99,19 @@ grad_u = d3.grad(u) + ey*lift(tau_u1)
 # Forcing: 4-roll-mill
 # -------------------------
 # Base forcing: 4-roll-mill (fixed in time)
+# f0 = dist.VectorField(coords, name='f0', bases=(xb, yb))
+# f0['g'][0] =  -2*np.sin(x)*np.cos(y)
+# f0['g'][1] =   2*np.cos(x)*np.sin(y)
 f0 = dist.VectorField(coords, name='f0', bases=(xb, yb))
-f0['g'][0] =  -2*np.sin(x)*np.cos(y)
-f0['g'][1] =   2*np.cos(x)*np.sin(y)
+Amp = 64
+f0['g'][0] =  -Amp*np.cos(4*y)
+f0['g'][1] =  0
 
 # Total forcing used by Stokes each step:
 # f_total = f0 + div(tau_p)
 f_total = dist.VectorField(coords, name='f_total', bases=(xb, yb))
 f_total['g'][0] = f0['g'][0]
 f_total['g'][1] = f0['g'][1]
-
 
 
 # -------------------------
@@ -217,7 +228,7 @@ def trC_grad_sq_int():
     return global_int_array(trx['g']**2 + try_['g']**2)
 
 # write every 1.0 units of simulation time
-snap = csolver.evaluator.add_file_handler("snapshots", sim_dt=.1, max_writes=None)
+snap = csolver.evaluator.add_file_handler("snapshots", sim_dt=.1, max_writes=10)
 
 snap.add_task(u@ex, name="ux")
 snap.add_task(u@ey, name="uy")

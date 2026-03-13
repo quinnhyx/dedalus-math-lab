@@ -1,0 +1,129 @@
+import numpy as np
+import dedalus.public as d3
+import logging
+
+logger = logging.getLogger(__name__)
+
+# -------------------------
+# Parameters
+# -------------------------
+
+Lx = 10
+Nx = 256
+Ny = 256
+
+Re = 1e-2
+Wi = 40
+beta = 0.8
+eps = 1e-3
+kappa = 5e-5
+
+dt = 5e-3
+stop_time = 200
+
+# -------------------------
+# Domain
+# -------------------------
+
+coords = d3.CartesianCoordinates('x','y')
+dist = d3.Distributor(coords, dtype=np.float64)
+
+xbasis = d3.RealFourier(coords['x'], Nx, bounds=(0,Lx))
+ybasis = d3.Chebyshev(coords['y'], Ny, bounds=(-1,1))
+
+# -------------------------
+# Fields
+# -------------------------
+
+u = dist.VectorField(coords,name='u',bases=(xbasis,ybasis))
+p = dist.Field(name='p',bases=(xbasis,ybasis))
+
+cxx = dist.Field(name='cxx',bases=(xbasis,ybasis))
+cxy = dist.Field(name='cxy',bases=(xbasis,ybasis))
+cyy = dist.Field(name='cyy',bases=(xbasis,ybasis))
+
+tau = dist.Field(name='tau')
+
+# -------------------------
+# Operators
+# -------------------------
+
+grad = lambda A: d3.Gradient(A,coords)
+div = lambda A: d3.Divergence(A)
+lap = lambda A: d3.Laplacian(A)
+
+ex,ey = coords.unit_vector_fields(dist)
+
+# -------------------------
+# Problem
+# -------------------------
+
+problem = d3.IVP([u,p,cxx,cxy,cyy,tau],namespace=locals())
+
+# incompressibility
+problem.add_equation("div(u) + tau = 0")
+
+# momentum
+problem.add_equation("""
+dt(u) + grad(p) - beta/Re*lap(u) = -u@grad(u)+ (1-beta)/(Re*Wi)*(grad(cxx)*ex + grad(cxy)*ey)+ 2/Re*ex
+""")
+
+# polymer equations
+problem.add_equation("""
+dt(cxx) - kappa*lap(cxx)= -u@grad(cxx)+ 2*grad(u)[0,0]*cxx+ 2*grad(u)[0,1]*cxy- (cxx-1)/Wi*(1-2*eps+eps*(cxx+cyy))
+""")
+
+problem.add_equation("""
+dt(cxy) - kappa*lap(cxy)= -u@grad(cxy)+ grad(u)[0,0]*cxy+ grad(u)[0,1]*cyy+ grad(u)[1,0]*cxx+ grad(u)[1,1]*cxy- cxy/Wi*(1-2*eps+eps*(cxx+cyy))
+""")
+
+problem.add_equation("""
+dt(cyy) - kappa*lap(cyy)= -u@grad(cyy)+ 2*grad(u)[1,1]*cyy+ 2*grad(u)[1,0]*cxy- (cyy-1)/Wi*(1-2*eps+eps*(cxx+cyy))
+""")
+
+# boundary conditions
+problem.add_equation("u(x,-1)=0")
+problem.add_equation("u(x,1)=0")
+
+problem.add_equation("integ(p)=0")
+
+# -------------------------
+# Solver
+# -------------------------
+
+solver = problem.build_solver(d3.RK443)
+solver.stop_sim_time = stop_time
+
+# -------------------------
+# Initial condition
+# -------------------------
+
+x,y = dist.local_grids(xbasis,ybasis)
+
+u['g'][0] = 1-y**2
+u['g'][1] = 0
+
+cxx['g'] = 1 + 0.01*np.exp(-((x-Lx/2)**2+y**2)*5)
+cyy['g'] = 1
+cxy['g'] = 0
+
+# -------------------------
+# Analysis
+# -------------------------
+
+snapshots = solver.evaluator.add_file_handler(
+"data",sim_dt=1)
+
+snapshots.add_task(u,name='velocity')
+snapshots.add_task(cxx+cyy,name='trace_c')
+
+# -------------------------
+# Main loop
+# -------------------------
+
+while solver.proceed:
+
+    solver.step(dt)
+
+    if solver.iteration%100==0:
+        logger.info(f"iter={solver.iteration} t={solver.sim_time}")

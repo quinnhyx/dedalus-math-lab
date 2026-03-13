@@ -99,4 +99,4 @@ plt.tight_layout()
 plt.show()
 
 # 保存动画
-# ani.save("flow_slice_animation.mp4", dpi=200)
+ani.save("flow_slice_animation.mp4", dpi=200)

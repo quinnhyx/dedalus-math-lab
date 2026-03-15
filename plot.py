@@ -7,7 +7,9 @@ from matplotlib.animation import FuncAnimation
 # -----------------------------
 # Load files
 # -----------------------------
-files = sorted(glob.glob("snapshots/snapshots_s*.h5"))
+# files = sorted(glob.glob("snapshots/snapshots_s*.h5"))
+files = sorted(glob.glob("snapshots-constant/snapshots-constant_s*.h5"))
+
 
 trC = []
 ux = []
@@ -99,4 +101,5 @@ plt.tight_layout()
 plt.show()
 
 # 保存动画
-ani.save("flow_slice_animation.mp4", dpi=200)
+# ani.save("flow_slice_animation.mp4", dpi=200)
+ani.save("flow_slice_constant_animation.mp4", dpi=200)

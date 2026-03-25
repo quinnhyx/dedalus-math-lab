@@ -1,17 +1,12 @@
 import numpy as np
 import dedalus.public as d3
 from mpi4py import MPI
+import time
+from time import perf_counter
 
 # -------------------------
 # Parameters
 # -------------------------
-# Lx = 2*np.pi
-# Ly = 2*np.pi
-# Nx = Ny = 128
-# beta = 1.0 
-# dealias = 3/2
-# Reynolds = 100.0
-# nu = 1 / Reynolds
 lenfactor = 4. 
 Ly = np.pi/2
 Lx = lenfactor*Ly
@@ -20,15 +15,18 @@ Nx = 128
 dealias = 3/2
 Reynolds = 1
 nu = 1 / Reynolds
+epsilon = 10e-3
+
 
 # Linear conformation stepping-stone params
 kappa_c = 0     # diffusion on C components
-tauR    = .3       # relaxation time (C -> I)
+# tauR    = .3       # relaxation time (C -> I)
+wi = 10.0       # Weissenberg number (relaxation time * shear rate)
 dt_step = .00125 #5e-4   # small enough for Nx=1024 i used: grid.dt = (.01/(2^(log2(grid.Nx)-6)));  
-t_end   = max(2,10*tauR)
+t_end   = max(2,10*wi)
 
 # Coupling strength for polymer stress in Stokes forcing:
-alpha_p = .5/tauR   # 
+alpha_p = .5/wi   # 
 
 comm = MPI.COMM_WORLD
 
@@ -104,7 +102,7 @@ grad_u = d3.grad(u) + ey*lift(tau_u1)
 # f0['g'][1] =   2*np.cos(x)*np.sin(y)
 f0 = dist.VectorField(coords, name='f0', bases=(xb, yb))
 Amp = 64
-f0['g'][0] =  -Amp*np.cos(4*y)
+f0['g'][0] =  2/Reynolds
 f0['g'][1] =  0
 
 # Total forcing used by Stokes each step:
@@ -121,7 +119,6 @@ cxx = dist.Field(name='cxx', bases=(xb, yb))
 cxy = dist.Field(name='cxy', bases=(xb, yb))
 cyy = dist.Field(name='cyy', bases=(xb, yb))
 
-
 # Initial condition: identity + blob
 blob = np.exp(-((x-np.pi)**2 + (y-np.pi/2)**2)/(0.3**2))
 cxx['g'] = 1.0# + 0.2*blob
@@ -136,7 +133,7 @@ stokes = d3.IVP([u, p, tau_p, tau_u1, tau_u2], namespace=locals())
 stokes.add_equation("trace(grad_u) + tau_p = 0")
 
 # Momentum and tracer (use div(grad_*) instead of lap(*))
-stokes.add_equation("dt(u) + grad(p) - nu*div(grad_u) + lift(tau_u2) = - u@grad(u) + f_total")
+stokes.add_equation("dt(u) + grad(p) - nu*div(grad_u) + lift(tau_u2) = - u@grad(u)+ f_total")
 stokes.add_equation(f"u(y=0) = 0")
 stokes.add_equation(f"u(y={Ly}) = 0")
 
@@ -153,23 +150,23 @@ stokes_solver = stokes.build_solver(d3.RK443)
 
 # -------------------------
 # Conformation IVP: upper-convected Oldroyd-B (with diffusion + linear relaxation)
-# dt(C) - kappa ΔC = -(u·∇C) + (∇u)C + C(∇u)^T - (1/tauR)(C-I)
+# dt(C) - kappa ΔC = -(u·∇C) + (∇u)C + C(∇u)^T - (1/wi)(C-I)
 # -------------------------
 cprob = d3.IVP([cxx, cxy, cyy], namespace=locals())
 
 cprob.add_equation(
     "dt(cxx) - kappa_c*div(grad(cxx)) = -(u@grad(cxx))"
-    " + 2*(ux_x*cxx + ux_y*cxy) - (1/tauR)*(cxx - 1)"
+    " + 2*(ux_x*cxx + ux_y*cxy) - (1/wi)*(cxx - 1)*(1-2*epsilon+epsilon*(cxx+cyy))"
 )
 
 cprob.add_equation(
     "dt(cxy) - kappa_c*div(grad(cxy)) = -(u@grad(cxy))"
-    " + (ux_x*cxy + ux_y*cyy + cxx*uy_x + cxy*uy_y) - (1/tauR)*cxy"
+    " + (ux_x*cxy + ux_y*cyy + cxx*uy_x + cxy*uy_y) - (1/wi)*cxy*(1-2*epsilon+epsilon*(cxx+cyy))"
 )
 
 cprob.add_equation(
     "dt(cyy) - kappa_c*div(grad(cyy)) = -(u@grad(cyy))"
-    " + 2*(uy_x*cxy + uy_y*cyy) - (1/tauR)*(cyy - 1)"
+    " + 2*(uy_x*cxy + uy_y*cyy) - (1/wi)*(cyy - 1)*(1-2*epsilon+epsilon*(cxx+cyy))"
 )
 
 csolver = cprob.build_solver(d3.RK443)
@@ -228,7 +225,7 @@ def trC_grad_sq_int():
     return global_int_array(trx['g']**2 + try_['g']**2)
 
 # write every 1.0 units of simulation time
-snap = csolver.evaluator.add_file_handler("snapshots", sim_dt=.1, max_writes=10)
+snap = csolver.evaluator.add_file_handler("snapshots-channel", sim_dt=.1, max_writes=10)
 
 snap.add_task(u@ex, name="ux")
 snap.add_task(u@ey, name="uy")
@@ -245,14 +242,39 @@ snap.add_task(cyy,  name="cyy")
 t = 0.0
 it = 0
 prev_tr2 = None
+time_force_list = []
+time_stokes_list = []
+time_c_list = []
+time_total_list = []
+step_list = []
+
 
 while t < t_end - 1e-14:
     # --- Coupling: update forcing from current C, then solve Stokes for u,p ---
+    t_step_start = perf_counter()
+
+    t0 = perf_counter()
     update_forcing_from_C()
+    t_force = perf_counter() - t0
+
+    t0 = perf_counter()
     stokes_solver.step(dt_step)
+    t_stokes = perf_counter() - t0
 
-
+    t0 = perf_counter()
     csolver.step(dt_step)
+    t_c = perf_counter() - t0
+
+    t_total = perf_counter() - t_step_start
+
+    # 存数据
+    time_force_list.append(t_force)
+    time_stokes_list.append(t_stokes)
+    time_c_list.append(t_c)
+    time_total_list.append(t_total)
+    step_list.append(it)
+
+
     t += dt_step
     it += 1
 
@@ -267,3 +289,23 @@ while t < t_end - 1e-14:
 
         if comm.rank == 0:
             print(f"[C] it={it:5d} t={t:.4f}  max(trC)={tr_max:.6e}  max(|cxy|)={cxy_abs_max:.6e}")
+            print(f"Timing: force={t_force:.4e}s  stokes={t_stokes:.4e}s  c={t_c:.4e}s  total={t_total:.4e}s")
+
+# -----------------------------
+# Load data for plotting
+# -----------------------------
+import matplotlib.pyplot as plt
+
+plt.figure()
+
+plt.plot(step_list, time_force_list, label="Forcing")
+plt.plot(step_list, time_stokes_list, label="Stokes")
+plt.plot(step_list, time_c_list, label="Conformation")
+plt.plot(step_list, time_total_list, label="Total")
+
+plt.xlabel("Iteration")
+plt.ylabel("Time (s)")
+plt.legend()
+plt.title("Timing per Step")
+plt.savefig("timing10wi.png")
+plt.show()

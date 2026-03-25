@@ -104,7 +104,7 @@ grad_u = d3.grad(u) + ey*lift(tau_u1)
 # f0['g'][1] =   2*np.cos(x)*np.sin(y)
 f0 = dist.VectorField(coords, name='f0', bases=(xb, yb))
 Amp = 64
-f0['g'][0] =  -Amp*np.cos(4*y)
+f0['g'][0] =  1
 f0['g'][1] =  0
 
 # Total forcing used by Stokes each step:
@@ -136,7 +136,7 @@ stokes = d3.IVP([u, p, tau_p, tau_u1, tau_u2], namespace=locals())
 stokes.add_equation("trace(grad_u) + tau_p = 0")
 
 # Momentum and tracer (use div(grad_*) instead of lap(*))
-stokes.add_equation("dt(u) + grad(p) - nu*div(grad_u) + lift(tau_u2) = - u@grad(u) + f_total")
+stokes.add_equation("dt(u) + grad(p) - nu*div(grad_u) + lift(tau_u2) = - u@grad(u)+ f_total")
 stokes.add_equation(f"u(y=0) = 0")
 stokes.add_equation(f"u(y={Ly}) = 0")
 
@@ -228,7 +228,7 @@ def trC_grad_sq_int():
     return global_int_array(trx['g']**2 + try_['g']**2)
 
 # write every 1.0 units of simulation time
-snap = csolver.evaluator.add_file_handler("snapshots", sim_dt=.1, max_writes=10)
+snap = csolver.evaluator.add_file_handler("snapshots-constant", sim_dt=.1, max_writes=10)
 
 snap.add_task(u@ex, name="ux")
 snap.add_task(u@ey, name="uy")

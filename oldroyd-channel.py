@@ -12,22 +12,24 @@ Ly = np.pi/2
 Lx = lenfactor*Ly
 Ny = 128
 Nx = 128
+beta = 0.8
 dealias = 3/2
 Reynolds = 1
-nu = 1 / Reynolds
+nu = beta / Reynolds
 epsilon = 10e-3
 
 
+
 # Linear conformation stepping-stone params
-kappa_c = 0     # diffusion on C components
+kappa_c = 5*10e-5     # diffusion on C components
 # tauR    = .3       # relaxation time (C -> I)
-wi = 10.0       # Weissenberg number (relaxation time * shear rate)
+wi = 1.0       # Weissenberg number (relaxation time * shear rate)
 dt_step = .00125 #5e-4   # small enough for Nx=1024 i used: grid.dt = (.01/(2^(log2(grid.Nx)-6)));  
 t_end   = max(2,10*wi)
 
 # Coupling strength for polymer stress in Stokes forcing:
-alpha_p = .5/wi   # 
-
+# alpha_p = .5/wi   # 
+alpha_p = (1-beta)/(Reynolds*wi)
 comm = MPI.COMM_WORLD
 
 dx_phys = Lx / Nx
@@ -121,9 +123,9 @@ cyy = dist.Field(name='cyy', bases=(xb, yb))
 
 # Initial condition: identity + blob
 blob = np.exp(-((x-np.pi)**2 + (y-np.pi/2)**2)/(0.3**2))
-cxx['g'] = 1.0# + 0.2*blob
+cxx['g'] = 1.0 + 0.2*blob
 cxy['g'] = 0.0
-cyy['g'] = 1.0#+ 0.2*blob
+cyy['g'] = 1.0 + 0.2*blob
 
 # -------------------------
 # Stokes LBVP
@@ -242,38 +244,14 @@ snap.add_task(cyy,  name="cyy")
 t = 0.0
 it = 0
 prev_tr2 = None
-time_force_list = []
-time_stokes_list = []
-time_c_list = []
-time_total_list = []
-step_list = []
-
 
 while t < t_end - 1e-14:
     # --- Coupling: update forcing from current C, then solve Stokes for u,p ---
-    t_step_start = perf_counter()
-
-    t0 = perf_counter()
     update_forcing_from_C()
-    t_force = perf_counter() - t0
 
-    t0 = perf_counter()
     stokes_solver.step(dt_step)
-    t_stokes = perf_counter() - t0
 
-    t0 = perf_counter()
     csolver.step(dt_step)
-    t_c = perf_counter() - t0
-
-    t_total = perf_counter() - t_step_start
-
-    # 存数据
-    time_force_list.append(t_force)
-    time_stokes_list.append(t_stokes)
-    time_c_list.append(t_c)
-    time_total_list.append(t_total)
-    step_list.append(it)
-
 
     t += dt_step
     it += 1
@@ -289,23 +267,4 @@ while t < t_end - 1e-14:
 
         if comm.rank == 0:
             print(f"[C] it={it:5d} t={t:.4f}  max(trC)={tr_max:.6e}  max(|cxy|)={cxy_abs_max:.6e}")
-            print(f"Timing: force={t_force:.4e}s  stokes={t_stokes:.4e}s  c={t_c:.4e}s  total={t_total:.4e}s")
 
-# -----------------------------
-# Load data for plotting
-# -----------------------------
-import matplotlib.pyplot as plt
-
-plt.figure()
-
-plt.plot(step_list, time_force_list, label="Forcing")
-plt.plot(step_list, time_stokes_list, label="Stokes")
-plt.plot(step_list, time_c_list, label="Conformation")
-plt.plot(step_list, time_total_list, label="Total")
-
-plt.xlabel("Iteration")
-plt.ylabel("Time (s)")
-plt.legend()
-plt.title("Timing per Step")
-plt.savefig("timing10wi.png")
-plt.show()

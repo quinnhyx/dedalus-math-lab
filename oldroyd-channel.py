@@ -12,22 +12,24 @@ Ly = np.pi/2
 Lx = lenfactor*Ly
 Ny = 128
 Nx = 128
+beta = 0.8
 dealias = 3/2
 Reynolds = 1
-nu = 1 / Reynolds
+nu = beta / Reynolds
 epsilon = 10e-3
+
 
 
 # Linear conformation stepping-stone params
 kappa_c = 5*10e-5     # diffusion on C components
 # tauR    = .3       # relaxation time (C -> I)
-wi = 10.0       # Weissenberg number (relaxation time * shear rate)
+wi = 1.0       # Weissenberg number (relaxation time * shear rate)
 dt_step = .00125 #5e-4   # small enough for Nx=1024 i used: grid.dt = (.01/(2^(log2(grid.Nx)-6)));  
 t_end   = max(2,10*wi)
 
 # Coupling strength for polymer stress in Stokes forcing:
-alpha_p = .5/wi   # 
-
+# alpha_p = .5/wi   # 
+alpha_p = (1-beta)/(Reynolds*wi)
 comm = MPI.COMM_WORLD
 
 dx_phys = Lx / Nx
@@ -121,9 +123,9 @@ cyy = dist.Field(name='cyy', bases=(xb, yb))
 
 # Initial condition: identity + blob
 blob = np.exp(-((x-np.pi)**2 + (y-np.pi/2)**2)/(0.3**2))
-cxx['g'] = 1.0# + 0.2*blob
+cxx['g'] = 1.0 + 0.2*blob
 cxy['g'] = 0.0
-cyy['g'] = 1.0#+ 0.2*blob
+cyy['g'] = 1.0 + 0.2*blob
 
 # -------------------------
 # Stokes LBVP

@@ -104,4 +104,4 @@ plt.show()
 # 保存动画
 # ani.save("flow_slice_animation.mp4", dpi=200)
 # ani.save("flow_slice_constant_animation.mp4", dpi=200)
-ani.save("flow_slice_channel10_animation.mp4", dpi=200)
+ani.save("flow_slice_channel_wi1_animation.mp4", dpi=200)

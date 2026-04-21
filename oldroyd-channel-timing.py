@@ -319,7 +319,12 @@ for Ny in Ny_list:
     # -------------------------
     # Output
     # -------------------------
-    snap = csolver.evaluator.add_file_handler("snapshots-channel", sim_dt=0.1, max_writes=10)
+    snap = csolver.evaluator.add_file_handler(
+        f"snapshots-channel-Ny{Ny}",
+        sim_dt=0.1,
+        max_writes=50,
+        mode = 'overwrite'
+    )    
     snap.add_task(u @ ex, name="ux")
     snap.add_task(u @ ey, name="uy")
     snap.add_task(p, name="p")
@@ -374,4 +379,5 @@ for Ny in Ny_list:
 
     if comm.rank == 0:
         print(f"Ny={Ny} runtime: {runtime:.4f} seconds")
-        
+
+print("All simulations completed.")

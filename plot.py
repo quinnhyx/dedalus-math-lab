@@ -1,107 +1,142 @@
 import glob
+import os
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
+Lx = 10
+Ly = 2
 
 # -----------------------------
 # Load files
 # -----------------------------
 # files = sorted(glob.glob("snapshots/snapshots_s*.h5"))
 # files = sorted(glob.glob("snapshots-channel/snapshots-channel_s*.h5"))
-files = sorted(glob.glob("snapshots-channel/snapshots-channel_s*.h5"))
+# files = sorted(glob.glob("snapshots-channel/snapshots-channel_s*.h5"))
+folders = sorted(glob.glob("snapshots-channel-Ny*"))
+print("Found folders:", folders)
+for folder in folders:
+    print(f"\nProcessing {folder}") 
+    # Extract Ny from folder name 
+    Ny = folder.split("Ny")[-1] 
+    #  Load files #
+    # Dedalus naming: <folder>_s*.h5 
+    base = os.path.basename(folder) 
+    files = sorted(glob.glob(f"{folder}/{base}_s*.h5")) 
+    if len(files) == 0: 
+        print(f"⚠️ No files found in {folder}, skipping.") 
+        continue
+    trC = []
+    ux = []
+    uy = []
+    times = []
 
+    for fname in files:
+        with h5py.File(fname, "r") as f:
 
-trC = []
-ux = []
-uy = []
-times = []
+            ux.append(f["tasks"]["ux"][:])
+            uy.append(f["tasks"]["uy"][:])
 
-for fname in files:
-    with h5py.File(fname, "r") as f:
+            cxx = f["tasks"]["cxx"][:]
+            cyy = f["tasks"]["cyy"][:]
+            trC.append(cxx + cyy)
 
-        ux.append(f["tasks"]["ux"][:])
-        uy.append(f["tasks"]["uy"][:])
+            times.append(f["scales"]["sim_time"][:])
 
-        cxx = f["tasks"]["cxx"][:]
-        cyy = f["tasks"]["cyy"][:]
-        trC.append(cxx + cyy)
+    ux = np.concatenate(ux)
+    uy = np.concatenate(uy)
+    trC = np.concatenate(trC)
+    times = np.concatenate(times)
 
-        times.append(f["scales"]["sim_time"][:])
+    u_mag = np.sqrt(ux**2 + uy**2)
 
-ux = np.concatenate(ux)
-uy = np.concatenate(uy)
-trC = np.concatenate(trC)
-times = np.concatenate(times)
+    print("Total frames:", len(times))
+    print("Data shape:", trC.shape)
 
-u_mag = np.sqrt(ux**2 + uy**2)
+    # -----------------------------
+    # Grid info
+    # -----------------------------
+    Nt, Nx, Ny = trC.shape
 
-print("Total frames:", len(times))
-print("Data shape:", trC.shape)
+    x0_index = Nx // 2   # 固定 x0 在中间
+    y = np.arange(Ny)
 
-# -----------------------------
-# Grid info
-# -----------------------------
-Nt, Nx, Ny = trC.shape
+    # -----------------------------
+    # Color limits
+    # -----------------------------
+    cmin, cmax = trC.min(), trC.max()
+    umin, umax = u_mag.min(), u_mag.max()
 
-x0_index = Nx // 2   # 固定 x0 在中间
-y = np.arange(Ny)
+    # -----------------------------
+    # Plot setup
+    # -----------------------------
+    fig, axes = plt.subplots(1,3, figsize=(18,4))
 
-# -----------------------------
-# Color limits
-# -----------------------------
-cmin, cmax = trC.min(), trC.max()
-umin, umax = u_mag.min(), u_mag.max()
+    ax1, ax2, ax3 = axes
 
-# -----------------------------
-# Plot setup
-# -----------------------------
-fig, axes = plt.subplots(1,3, figsize=(18,4))
+    # trC field
+    im1 = ax1.imshow(
+        trC[0].T,
+        origin="lower",
+        vmin=cmin,
+        vmax=cmax,
+        extent=[0, Lx, -Ly/2, Ly/2],   # ⭐ key fix
+        aspect='auto'
+    )
+    ax1.set_title("Polymer Stretch tr(C)")
 
-ax1, ax2, ax3 = axes
+    # velocity magnitude
+    im2 = ax2.imshow(
+        u_mag[0].T,
+        origin="lower",
+        vmin=umin,
+        vmax=umax,
+        extent=[0, Lx, -Ly/2, Ly/2],
+        aspect='auto'
+    )
+    ax2.set_title("Velocity |u|")
 
-# trC field
-im1 = ax1.imshow(trC[0].T, origin="lower",
-                 cmap="viridis", vmin=cmin, vmax=cmax)
-ax1.set_title("Polymer Stretch tr(C)")
+    # slice plot
+    line, = ax3.plot(y, trC[0, x0_index, :], linewidth=2)
+    ax3.set_ylim(cmin, cmax)
+    ax3.set_title(f"tr(C) slice at x index = {x0_index}")
+    ax3.set_xlabel("y")
+    ax3.set_ylabel("tr(C)")
 
-# velocity magnitude
-im2 = ax2.imshow(u_mag[0].T, origin="lower",
-                 cmap="plasma", vmin=umin, vmax=umax)
-ax2.set_title("Velocity |u|")
+    plt.colorbar(im1, ax=ax1)
+    plt.colorbar(im2, ax=ax2)
 
-# slice plot
-line, = ax3.plot(y, trC[0, x0_index, :], linewidth=2)
-ax3.set_ylim(cmin, cmax)
-ax3.set_title(f"tr(C) slice at x index = {x0_index}")
-ax3.set_xlabel("y")
-ax3.set_ylabel("tr(C)")
+    title = fig.suptitle("")
 
-plt.colorbar(im1, ax=ax1)
-plt.colorbar(im2, ax=ax2)
+    # -----------------------------
+    # Animation update
+    # -----------------------------
+    def update(i):
 
-title = fig.suptitle("")
+        im1.set_data(trC[i].T)
+        im2.set_data(u_mag[i].T)
 
-# -----------------------------
-# Animation update
-# -----------------------------
-def update(i):
+        line.set_ydata(trC[i, x0_index, :])
 
-    im1.set_data(trC[i].T)
-    im2.set_data(u_mag[i].T)
+        title.set_text(f"t = {times[i]:.3f}")
 
-    line.set_ydata(trC[i, x0_index, :])
+        return im1, im2, line
 
-    title.set_text(f"t = {times[i]:.3f}")
+    ani = FuncAnimation(fig, update, frames=len(times), interval=60)
 
-    return im1, im2, line
+    plt.tight_layout()
+    plt.show()
 
-ani = FuncAnimation(fig, update, frames=len(times), interval=60)
+    # ani.save("flow_slice_animation.mp4", dpi=200)
+    # ani.save("flow_slice_constant_animation.mp4", dpi=200)
+    # -----------------------------
+    # Save animation
+    # -----------------------------
+    output_name = f"flow_animation_Ny{Ny}.mp4"
+    print("Saving:", output_name)
 
-plt.tight_layout()
-plt.show()
+    ani.save(output_name, dpi=200)
 
-# 保存动画
-# ani.save("flow_slice_animation.mp4", dpi=200)
-# ani.save("flow_slice_constant_animation.mp4", dpi=200)
-ani.save("flow_slice_channel_wi1_animation.mp4", dpi=200)
+    plt.close(fig)
+
+print("\nAll animations generated.")

@@ -37,12 +37,12 @@ nu = beta / Reynolds
 epsilon = 1e-3
 
 kappa_c = 5e-5
-wi = 1.0
+wi = 10.0
 dt_step = 5e-3
 
 
 t0 = 0.0
-t1_target = 5.0
+t1_target = 1.0
 
 checkpoint_dt = 0.1
 snapshot_dt = 0.1
@@ -57,7 +57,7 @@ restart_index = -1
 # =============================================================
 # Restart options
 # =============================================================
-restart_mode = "from_checkpoint"   # "none" or "from_checkpoint"
+restart_mode = "none"   # "none" or "from_checkpoint"
 
 stokes_restart_file = find_closest_checkpoint("checkpoints_stokes", "checkpoints_stokes")
 conf_restart_file   = find_closest_checkpoint("checkpoints_conf", "checkpoints_conf")

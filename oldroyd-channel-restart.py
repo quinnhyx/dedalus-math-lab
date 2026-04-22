@@ -184,9 +184,6 @@ cyy_bL = dist.Field(name='cyy_bL', bases=xb)
 # ============================================================
 # Initial condition
 # ============================================================
-# ============================================================
-# Initial condition
-# ============================================================
 if restart_mode == "none":
     blob = np.exp(-((x - Lx / 2) ** 2 + y ** 2) / (0.3 ** 2))
     cxx['g'] = 1.0 + 0.2 * blob
@@ -333,7 +330,7 @@ csolver.stop_sim_time = t1_stop
 # Output handlers
 # ============================================================
 snapshots = csolver.evaluator.add_file_handler(
-    "snapshots-wi10",
+    f"snapshots-wi{wi:.1f}-{t0:.1f}-{t1_target:.1f}",
     sim_dt=snapshot_dt,
     max_writes=200,
     mode=file_handler_mode,

@@ -6,20 +6,19 @@ import re
 import glob
 import h5py
 
-def find_closest_checkpoint(folder, prefix, target):
+def find_closest_checkpoint(folder, prefix):
     files = glob.glob(f"{folder}/{prefix}_s*.h5")
 
     best_file = None
-    best_diff = 1e9
+    best_time = -1
 
     for f in files:
         with h5py.File(f, 'r') as h5:
             t = h5['scales/sim_time'][-1]
             print(f"Found checkpoint {f} with sim_time={t:.12f}")
 
-        diff = abs(t - target)
-        if diff < best_diff:
-            best_diff = diff
+        if t > best_time:
+            best_time = t
             best_file = f
 
     return best_file
@@ -38,12 +37,12 @@ nu = beta / Reynolds
 epsilon = 1e-3
 
 kappa_c = 5e-5
-wi = 10.0
+wi = 1.0
 dt_step = 5e-3
 
 
 t0 = 0.0
-t1_target = 1.0
+t1_target = 5.0
 
 checkpoint_dt = 0.1
 snapshot_dt = 0.1
@@ -58,10 +57,10 @@ restart_index = -1
 # =============================================================
 # Restart options
 # =============================================================
-restart_mode = "none"   # "none" or "from_checkpoint"
+restart_mode = "from_checkpoint"   # "none" or "from_checkpoint"
 
-stokes_restart_file = find_closest_checkpoint("checkpoints_stokes", "checkpoints_stokes", t0)
-conf_restart_file   = find_closest_checkpoint("checkpoints_conf", "checkpoints_conf", t0)
+stokes_restart_file = find_closest_checkpoint("checkpoints_stokes", "checkpoints_stokes")
+conf_restart_file   = find_closest_checkpoint("checkpoints_conf", "checkpoints_conf")
 
 print("Using stokes:", stokes_restart_file)
 print("Using conf:", conf_restart_file)
@@ -330,9 +329,9 @@ csolver.stop_sim_time = t1_stop
 # Output handlers
 # ============================================================
 snapshots = csolver.evaluator.add_file_handler(
-    f"snapshots-wi{wi:.1f}-{t0:.1f}-{t1_target:.1f}",
+    f"snapshots-wi{wi:.1f}",
     sim_dt=snapshot_dt,
-    max_writes=200,
+    max_writes=50,
     mode=file_handler_mode,
 )
 snapshots.add_task(u @ ex, name="ux")

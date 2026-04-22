@@ -43,7 +43,7 @@ dt_step = 5e-3
 
 
 t0 = 0.0
-t1_target = 5.0
+t1_target = 1.0
 
 checkpoint_dt = 0.1
 snapshot_dt = 0.1
@@ -333,7 +333,7 @@ csolver.stop_sim_time = t1_stop
 # Output handlers
 # ============================================================
 snapshots = csolver.evaluator.add_file_handler(
-    "snapshots-restart",
+    "snapshots-wi10",
     sim_dt=snapshot_dt,
     max_writes=200,
     mode=file_handler_mode,

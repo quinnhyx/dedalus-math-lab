@@ -15,7 +15,7 @@ def find_closest_checkpoint(folder, prefix):
     for f in files:
         with h5py.File(f, 'r') as h5:
             t = h5['scales/sim_time'][-1]
-            print(f"Found checkpoint {f} with sim_time={t:.12f}")
+            # print(f"Found checkpoint {f} with sim_time={t:.12f}")
 
         if t > best_time:
             best_time = t
@@ -42,7 +42,7 @@ dt_step = 5e-3
 
 
 t0 = 0.0
-t1_target = 1.0
+t1_target = 5.0
 
 checkpoint_dt = 0.1
 snapshot_dt = 0.1
@@ -343,7 +343,7 @@ snapshots.add_task(cyy, name="cyy")
 snapshots.add_task(cxx + cyy, name="trC")
 
 checkpoints_stokes = stokes_solver.evaluator.add_file_handler(
-    "checkpoints_stokes",
+    f"checkpoints_stokes_wi{wi:.1f}",
     sim_dt=checkpoint_dt,
     max_writes=1,
     mode=file_handler_mode,
@@ -351,7 +351,7 @@ checkpoints_stokes = stokes_solver.evaluator.add_file_handler(
 checkpoints_stokes.add_tasks(stokes_solver.state)
 
 checkpoints_conf = csolver.evaluator.add_file_handler(
-    "checkpoints_conf",
+    f"checkpoints_conf_wi{wi:.1f}",
     sim_dt=checkpoint_dt,
     max_writes=1,
     mode=file_handler_mode,

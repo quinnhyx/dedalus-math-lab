@@ -5,30 +5,81 @@ import os
 import re
 import glob
 import h5py
+from steady_state_detector import SteadyStateDetector
 
-def find_closest_checkpoint(folder, prefix):
-    files = glob.glob(f"{folder}/{prefix}_s*.h5")
+# def find_closest_checkpoint(folder):
 
-    best_file = None
-    best_time = -1
+#     files = glob.glob(f"{folder}/*.h5")
 
-    for f in files:
-        with h5py.File(f, 'r') as h5:
-            t = h5['scales/sim_time'][-1]
-            # print(f"Found checkpoint {f} with sim_time={t:.12f}")
+#     if not files:
+#         print(f"[WARN] No files in {folder}")
+#         return None
 
-        if t > best_time:
-            best_time = t
-            best_file = f
+#     best_file = None
+#     best_time = -1
 
-    return best_file
+#     for f in files:
+#         with h5py.File(f, 'r') as h5:
+#             t = h5['scales/sim_time'][-1]
+
+#         if t > best_time:
+#             best_time = t
+#             best_file = f
+
+#     return best_file
+
+def find_latest_checkpoint(base_folder):
+    candidates = glob.glob(os.path.join(base_folder, "*_s*"))
+
+    latest_time = -np.inf
+    latest_file = None
+
+    for path in candidates:
+
+        # ---------- file checkpoint ----------
+        if path.endswith(".h5"):
+            try:
+                with h5py.File(path, 'r') as h5:
+                    t = h5['scales/sim_time'][-1]
+            except Exception:
+                continue
+
+        # ---------- mpi folder ----------
+        elif os.path.isdir(path):
+            h5_files = glob.glob(os.path.join(path, "*_p0.h5"))
+
+            if not h5_files:
+                continue
+
+            f = h5_files[0]
+
+            try:
+                with h5py.File(f, 'r') as h5:
+                    t = h5['scales/sim_time'][-1]
+            except Exception:
+                continue
+
+        else:
+            continue
+
+        # ---------- largest time ----------
+        if t > latest_time:
+            latest_time = t
+            latest_file = path if path.endswith(".h5") else f
+
+    if latest_file is None:
+        raise RuntimeError(f"No valid checkpoint found in {base_folder}")
+
+    print(f"[DEBUG] latest checkpoint: {latest_file}, t={latest_time}")
+
+    return latest_file
 
 # =============================================================
 # Parameters
 # =============================================================
 Ly = 2.0
 Lx = 10.0
-Ny = 256
+Ny = 1024
 Nx = 256
 beta = 0.8
 dealias = 3/2
@@ -37,12 +88,12 @@ nu = beta / Reynolds
 epsilon = 1e-3
 
 kappa_c = 5e-5
-wi = 10.0
+wi = 26.0
 dt_step = 5e-3
 
 
 t0 = 0.0
-t1_target = 5.0
+t1_target = 500.0
 
 checkpoint_dt = 0.1
 snapshot_dt = 0.1
@@ -57,13 +108,7 @@ restart_index = -1
 # =============================================================
 # Restart options
 # =============================================================
-restart_mode = "none"   # "none" or "from_checkpoint"
-
-stokes_restart_file = find_closest_checkpoint("checkpoints_stokes", "checkpoints_stokes")
-conf_restart_file   = find_closest_checkpoint("checkpoints_conf", "checkpoints_conf")
-
-print("Using stokes:", stokes_restart_file)
-print("Using conf:", conf_restart_file)
+restart_mode = "from_checkpoint"   # "none" or "from_checkpoint"
 
 restart_index = -1
 
@@ -108,6 +153,12 @@ def monitor_stats():
     cxy_abs_max = mpi_max(np.max(np.abs(cxy['g'])))
 
     return tr_max, tr_min, det_min, umax, cxy_abs_max
+
+def compute_kinetic_energy():
+    u.change_scales(1)
+    usq = u['g'][0]**2 + u['g'][1]**2
+    local_E = 0.5 * np.mean(usq)   # or integrate if you prefer
+    return comm.allreduce(local_E, op=MPI.SUM)
 
 # ============================================================
 # Domain / fields
@@ -304,8 +355,13 @@ csolver = cprob.build_solver(d3.RK443)
 # Restart handling
 # ============================================================
 file_handler_mode = "overwrite"
-
 if restart_mode == "from_checkpoint":
+
+    stokes_restart_file = find_latest_checkpoint("checkpoints_stokes-wi26.0")
+    conf_restart_file   = find_latest_checkpoint("checkpoints_conf-wi26.0")
+
+    print("Using stokes:", stokes_restart_file)
+    print("Using conf:", conf_restart_file)
 
     stokes_solver.load_state(stokes_restart_file, index=restart_index)
     csolver.load_state(conf_restart_file, index=restart_index)
@@ -343,17 +399,17 @@ snapshots.add_task(cyy, name="cyy")
 snapshots.add_task(cxx + cyy, name="trC")
 
 checkpoints_stokes = stokes_solver.evaluator.add_file_handler(
-    f"checkpoints_stokes_wi{wi:.1f}",
+    f"checkpoints_stokes-wi{wi:.1f}",
     sim_dt=checkpoint_dt,
-    max_writes=1,
+    max_writes=10,
     mode=file_handler_mode,
 )
 checkpoints_stokes.add_tasks(stokes_solver.state)
 
 checkpoints_conf = csolver.evaluator.add_file_handler(
-    f"checkpoints_conf_wi{wi:.1f}",
+    f"checkpoints_conf-wi{wi:.1f}",
     sim_dt=checkpoint_dt,
-    max_writes=1,
+    max_writes=10,
     mode=file_handler_mode,
 )
 checkpoints_conf.add_tasks(csolver.state)
@@ -440,28 +496,41 @@ def check_finite_state():
 # Loop
 # =============================================================
 it = 0
+detector = SteadyStateDetector(threshold=1e-8, duration=10.0)
 
 while stokes_solver.proceed and csolver.proceed:
+
     update_forcing_from_C()
 
     stokes_solver.step(dt_step)
     csolver.step(dt_step)
 
     it += 1
+    t = csolver.sim_time
 
+    # ---- stats + energy EVERY step----
+    E = compute_kinetic_energy()
+
+    # ---- monitor ----
     if it % 100 == 0:
+
         tr_max, tr_min, det_min, umax, cxy_abs_max = monitor_stats()
 
         if rank == 0:
             print(
-                f"[STAT] it={it:5d} t={csolver.sim_time:.5f} "
-                f"max(trC)={tr_max:.6e} min(trC)={tr_min:.6e} "
-                f"min(detC)={det_min:.6e} "
-                f"max|u|={umax:.6e} max|cxy|={cxy_abs_max:.6e}"
+                f"[STAT] it={it:5d} t={t:.5f} "
+                f"E={E:.6e} "
+                f"min(detC)={det_min:.6e}"
             )
 
+    # ---- steady check----
+    if detector.update(E, t):
+        if rank == 0:
+            print(f"[STOP] Steady state reached at t={t:.6f}")
+        break
 # =============================================================
 # Done
 # =============================================================
 if rank == 0:
+>>>>>>> adb0d04 (steady state detection and updates)
     print("DONE")

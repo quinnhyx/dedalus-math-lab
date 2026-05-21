@@ -1,150 +1,267 @@
 import glob
-import os
 import re
 import h5py
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation
+from matplotlib.animation import FuncAnimation, FFMpegWriter
 
+# ============================================================
+# Parameters
+# ============================================================
 Lx = 10
 Ly = 2
 
-# =============================
-# Target folder (wi = 26)
-# =============================
-folder = "snapshots-wi26.0"
+folder = "snapshots-wi40"
+output_name = "flow_animation_wi40.mp4"
 
-# 自动找所有 h5（并排序）
+# ============================================================
+# Find snapshot files
+# ============================================================
 files = sorted(
     glob.glob(f"{folder}/*.h5"),
     key=lambda x: int(re.search(r"_s(\d+)", x).group(1))
 )
 
-print("Found files:", files)
+print("Found files:")
+for f in files:
+    print(" ", f)
 
 if len(files) == 0:
     raise RuntimeError("No snapshot files found!")
 
-# =============================
-# Load data
-# =============================
-trC = []
-ux = []
-uy = []
+# ============================================================
+# Cache file handles (MUCH faster)
+# ============================================================
+print("\nOpening HDF5 files...")
+
+file_handles = {
+    fname: h5py.File(fname, "r")
+    for fname in files
+}
+
+# ============================================================
+# Build frame map
+# frame_map[k] = (filename, local_index)
+# ============================================================
+frame_map = []
 times = []
 
+print("\nIndexing frames...")
+
 for fname in files:
-    print("Loading:", fname)
-    with h5py.File(fname, "r") as f:
 
-        ux.append(f["tasks"]["ux"][:])
-        uy.append(f["tasks"]["uy"][:])
+    f = file_handles[fname]
 
-        cxx = f["tasks"]["cxx"][:]
-        cyy = f["tasks"]["cyy"][:]
-        trC.append(cxx + cyy)
+    nt = f["tasks"]["ux"].shape[0]
+    sim_times = f["scales"]["sim_time"][:]
 
-        times.append(f["scales"]["sim_time"][:])
+    for i in range(nt):
+        frame_map.append((fname, i))
+        times.append(sim_times[i])
 
-# 拼接时间序列
-ux = np.concatenate(ux)
-uy = np.concatenate(uy)
-trC = np.concatenate(trC)
-times = np.concatenate(times)
+times = np.array(times)
 
-u_mag = np.sqrt(ux**2 + uy**2)
+print("Total frames:", len(frame_map))
 
-print("First 10 times BEFORE sort:", times[:10])
-# =============================
-# FIX: sort by time
-# =============================
-idx = np.argsort(times)
+# ============================================================
+# Read one frame to determine shape
+# ============================================================
+sample = file_handles[files[0]]["tasks"]["trC"][0]
 
-times = times[idx]
-ux = ux[idx]
-uy = uy[idx]
-trC = trC[idx]
-u_mag = u_mag[idx]
-
-print("Total frames:", len(times))
-print("Data shape:", trC.shape)
-
-# =============================
-# Grid
-# =============================
-Nt, Nx, Ny = trC.shape
+Nx, Ny = sample.shape
 
 x0_index = Nx // 2
+
 y = np.linspace(-Ly/2, Ly/2, Ny)
 
-# =============================
-# Color limits
-# =============================
-cmin, cmax = trC.min(), trC.max()
-umin, umax = u_mag.min(), u_mag.max()
+print("Grid shape:", Nx, Ny)
 
-# =============================
-# Plot
-# =============================
-fig, axes = plt.subplots(1, 3, figsize=(18, 4))
+# ============================================================
+# Estimate color limits
+# ============================================================
+print("\nEstimating color limits...")
+
+cmin = np.inf
+cmax = -np.inf
+
+umin = np.inf
+umax = -np.inf
+
+sample_frames = min(50, len(frame_map))
+
+for k in range(sample_frames):
+
+    fname, i = frame_map[k]
+
+    f = file_handles[fname]
+
+    ux = f["tasks"]["ux"][i]
+    uy = f["tasks"]["uy"][i]
+
+    trC = f["tasks"]["trC"][i]
+
+    u_mag = np.sqrt(ux**2 + uy**2)
+
+    cmin = min(cmin, np.min(trC))
+    cmax = max(cmax, np.max(trC))
+
+    umin = min(umin, np.min(u_mag))
+    umax = max(umax, np.max(u_mag))
+
+print("tr(C) limits:", cmin, cmax)
+print("|u| limits:", umin, umax)
+
+# ============================================================
+# Figure setup
+# ============================================================
+fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
 ax1, ax2, ax3 = axes
 
-# trC
+dummy = np.zeros((Nx, Ny))
+
+# ============================================================
+# tr(C)
+# ============================================================
 im1 = ax1.imshow(
-    trC[0].T,
+    dummy.T,
     origin="lower",
+    extent=[0, Lx, -Ly/2, Ly/2],
+    aspect="auto",
     vmin=cmin,
     vmax=cmax,
-    extent=[0, Lx, -Ly/2, Ly/2],
-    aspect='auto'
+    cmap="viridis",
 )
-ax1.set_title("Polymer Stretch tr(C)")
 
-# velocity
+ax1.set_title("Polymer Stretch tr(C)")
+ax1.set_xlabel("x")
+ax1.set_ylabel("y")
+
+# ============================================================
+# |u|
+# ============================================================
 im2 = ax2.imshow(
-    u_mag[0].T,
+    dummy.T,
     origin="lower",
+    extent=[0, Lx, -Ly/2, Ly/2],
+    aspect="auto",
     vmin=umin,
     vmax=umax,
-    extent=[0, Lx, -Ly/2, Ly/2],
-    aspect='auto'
+    cmap="inferno",
 )
-ax2.set_title("Velocity |u|")
 
-# slice
-line, = ax3.plot(y, trC[0, x0_index, :], linewidth=2)
-ax3.set_ylim(cmin, cmax)
-ax3.set_title(f"tr(C) slice at x index = {x0_index}")
+ax2.set_title("Velocity Magnitude |u|")
+ax2.set_xlabel("x")
+ax2.set_ylabel("y")
+
+# ============================================================
+# Slice plot
+# ============================================================
+line, = ax3.plot(
+    y,
+    np.zeros(Ny),
+    linewidth=2
+)
+
+ax3.set_title(f"tr(C) Slice at x index {x0_index}")
 ax3.set_xlabel("y")
+ax3.set_ylabel("tr(C)")
 
+ax3.set_xlim(-Ly/2, Ly/2)
+ax3.set_ylim(cmin, cmax)
+
+ax3.grid(True)
+
+# ============================================================
+# Colorbars
+# ============================================================
 plt.colorbar(im1, ax=ax1)
 plt.colorbar(im2, ax=ax2)
 
+# ============================================================
+# Global title
+# ============================================================
 title = fig.suptitle("")
 
-# =============================
-# Animation
-# =============================
-def update(i):
-    im1.set_data(trC[i].T)
-    im2.set_data(u_mag[i].T)
-    line.set_ydata(trC[i, x0_index, :])
-    title.set_text(f"t = {times[i]:.3f}")
+plt.tight_layout(rect=[0, 0, 1, 0.95])
+
+# ============================================================
+# Animation update function
+# ============================================================
+def update(frame_id):
+
+    fname, i = frame_map[frame_id]
+
+    f = file_handles[fname]
+
+    ux = f["tasks"]["ux"][i]
+    uy = f["tasks"]["uy"][i]
+
+    trC = f["tasks"]["trC"][i]
+
+    u_mag = np.sqrt(ux**2 + uy**2)
+
+    # --------------------------------------------------------
+    # Update images
+    # --------------------------------------------------------
+    im1.set_data(trC.T)
+    im2.set_data(u_mag.T)
+
+    # --------------------------------------------------------
+    # Update slice
+    # --------------------------------------------------------
+    line.set_ydata(trC[x0_index, :])
+
+    # --------------------------------------------------------
+    # Update title
+    # --------------------------------------------------------
+    title.set_text(f"t = {times[frame_id]:.4f}")
+
+    print(
+        f"Rendering frame {frame_id+1}/{len(frame_map)}",
+        end="\r"
+    )
+
     return im1, im2, line
 
-ani = FuncAnimation(fig, update, frames=len(times), interval=50)
+# ============================================================
+# Create animation
+# ============================================================
+stride = 20
 
-plt.tight_layout()
-plt.show()
+ani = FuncAnimation(
+    fig,
+    update,
+    frames=range(0, len(frame_map), stride),
+    interval=50,
+    blit=False,
+    cache_frame_data=False,
+)
 
-# =============================
-# Save
-# =============================
-output_name = "flow_animation_wi26.mp4"
-print("Saving:", output_name)
+# ============================================================
+# Save animation
+# ============================================================
+writer = FFMpegWriter(
+    fps=30,
+    codec="libx264",
+    bitrate=1500
+)
 
-ani.save(output_name, dpi=200)
+print("\nSaving animation...")
+print("Output:", output_name)
 
+ani.save(
+    output_name,
+    writer=writer,
+    dpi=120
+)
+
+# ============================================================
+# Cleanup
+# ============================================================
 plt.close(fig)
 
-print("Done")
+for f in file_handles.values():
+    f.close()
+
+print("\nDone.")

@@ -20,7 +20,6 @@ class SteadyStateDetector:
 
     def update(self, E, t):
 
-        # 初始化
 
         if self.prev_E is None:
 
@@ -38,15 +37,11 @@ class SteadyStateDetector:
 
 
 
-        # 更新历史
-
         self.prev_E = E
 
         self.last_time = t
 
 
-
-        # 判断是否“足够小”
 
         if dE_dt < self.threshold:
 
@@ -56,7 +51,7 @@ class SteadyStateDetector:
 
             elif (t - self.steady_start_time) >= self.duration:
 
-                return True  # 满足停止条件
+                return True
 
         else:
 

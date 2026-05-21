@@ -7,27 +7,6 @@ import glob
 import h5py
 from steady_state_detector import SteadyStateDetector
 
-# def find_closest_checkpoint(folder):
-
-#     files = glob.glob(f"{folder}/*.h5")
-
-#     if not files:
-#         print(f"[WARN] No files in {folder}")
-#         return None
-
-#     best_file = None
-#     best_time = -1
-
-#     for f in files:
-#         with h5py.File(f, 'r') as h5:
-#             t = h5['scales/sim_time'][-1]
-
-#         if t > best_time:
-#             best_time = t
-#             best_file = f
-
-#     return best_file
-
 def find_latest_checkpoint(base_folder):
     candidates = glob.glob(os.path.join(base_folder, "*_s*"))
 
@@ -88,12 +67,12 @@ nu = beta / Reynolds
 epsilon = 1e-3
 
 kappa_c = 5e-5
-wi = 26.0
+wi = 80.0
 dt_step = 5e-3
 
 
 t0 = 0.0
-t1_target = 500.0
+t1_target = 1100.0
 
 checkpoint_dt = 0.1
 snapshot_dt = 0.1
@@ -104,7 +83,6 @@ snapshot_dt = 0.1
 stop_pad = 0.51 * dt_step
 t1_stop = t1_target + stop_pad
 
-restart_index = -1
 # =============================================================
 # Restart options
 # =============================================================
@@ -154,11 +132,70 @@ def monitor_stats():
 
     return tr_max, tr_min, det_min, umax, cxy_abs_max
 
+def monitor_tensor_stats():
+
+    # --------------------------------------------------------
+    # Ensure physical scale
+    # --------------------------------------------------------
+    cxx.change_scales(1)
+    cxy.change_scales(1)
+    cyy.change_scales(1)
+
+    # --------------------------------------------------------
+    # Local arrays
+    # --------------------------------------------------------
+    cxx_g = cxx['g']
+    cxy_g = cxy['g']
+    cyy_g = cyy['g']
+
+    # --------------------------------------------------------
+    # L2 norms
+    # --------------------------------------------------------
+    cxx_norm_local = np.sqrt(np.sum(cxx_g**2))
+    cxy_norm_local = np.sqrt(np.sum(cxy_g**2))
+    cyy_norm_local = np.sqrt(np.sum(cyy_g**2))
+
+    # --------------------------------------------------------
+    # Global L2 norms
+    # --------------------------------------------------------
+    cxx_norm = np.sqrt(comm.allreduce(cxx_norm_local**2, op=MPI.SUM))
+    cxy_norm = np.sqrt(comm.allreduce(cxy_norm_local**2, op=MPI.SUM))
+    cyy_norm = np.sqrt(comm.allreduce(cyy_norm_local**2, op=MPI.SUM))
+
+    # --------------------------------------------------------
+    # Maximum values
+    # --------------------------------------------------------
+    cxx_max = mpi_max(np.max(cxx_g))
+    cxy_max = mpi_max(np.max(cxy_g))
+    cyy_max = mpi_max(np.max(cyy_g))
+
+    return (
+        cxx_norm,
+        cxy_norm,
+        cyy_norm,
+        cxx_max,
+        cxy_max,
+        cyy_max,
+    )
+
+def any_nonfinite(*fields):
+    local_bad = False
+    for f in fields:
+        f.change_scales(1)
+        local_bad = local_bad or (not np.all(np.isfinite(f['g'])))
+    return comm.allreduce(local_bad, op=MPI.LOR)
+
 def compute_kinetic_energy():
     u.change_scales(1)
     usq = u['g'][0]**2 + u['g'][1]**2
-    local_E = 0.5 * np.mean(usq)   # or integrate if you prefer
-    return comm.allreduce(local_E, op=MPI.SUM)
+
+    local_sum = np.sum(usq)
+    local_count = usq.size
+
+    total_sum = comm.allreduce(local_sum, op=MPI.SUM)
+    total_count = comm.allreduce(local_count, op=MPI.SUM)
+
+    return 0.5 * total_sum / total_count
 
 # ============================================================
 # Domain / fields
@@ -354,11 +391,11 @@ csolver = cprob.build_solver(d3.RK443)
 # ============================================================
 # Restart handling
 # ============================================================
-file_handler_mode = "overwrite"
 if restart_mode == "from_checkpoint":
+    file_handler_mode = "append"   # append to existing files, which will be overwritten from the restart point onward
 
-    stokes_restart_file = find_latest_checkpoint("checkpoints_stokes-wi26.0")
-    conf_restart_file   = find_latest_checkpoint("checkpoints_conf-wi26.0")
+    stokes_restart_file = find_latest_checkpoint("checkpoints_stokes-wi40")
+    conf_restart_file   = find_latest_checkpoint("checkpoints_conf-wi40")
 
     print("Using stokes:", stokes_restart_file)
     print("Using conf:", conf_restart_file)
@@ -375,6 +412,8 @@ if restart_mode == "from_checkpoint":
         print(f"[Restart OK] resumed at t = {stokes_solver.sim_time:.6f}")
 
 else:
+    file_handler_mode = "overwrite"
+
     if rank == 0:
         print(f"[Fresh run] starting at t = {t0:.6f}")
 
@@ -385,7 +424,7 @@ csolver.stop_sim_time = t1_stop
 # Output handlers
 # ============================================================
 snapshots = csolver.evaluator.add_file_handler(
-    f"snapshots-wi{wi:.1f}",
+    "snapshots-wi40",
     sim_dt=snapshot_dt,
     max_writes=50,
     mode=file_handler_mode,
@@ -399,7 +438,7 @@ snapshots.add_task(cyy, name="cyy")
 snapshots.add_task(cxx + cyy, name="trC")
 
 checkpoints_stokes = stokes_solver.evaluator.add_file_handler(
-    f"checkpoints_stokes-wi{wi:.1f}",
+    "checkpoints_stokes-wi40",
     sim_dt=checkpoint_dt,
     max_writes=10,
     mode=file_handler_mode,
@@ -407,7 +446,7 @@ checkpoints_stokes = stokes_solver.evaluator.add_file_handler(
 checkpoints_stokes.add_tasks(stokes_solver.state)
 
 checkpoints_conf = csolver.evaluator.add_file_handler(
-    f"checkpoints_conf-wi{wi:.1f}",
+    "checkpoints_conf-wi40",
     sim_dt=checkpoint_dt,
     max_writes=10,
     mode=file_handler_mode,
@@ -440,26 +479,6 @@ def update_forcing_from_C():
 
     f_total['g'][0] = f0['g'][0] + divtau_x['g']
     f_total['g'][1] = f0['g'][1] + divtau_y['g']
-
-
-def monitor_stats():
-    u.change_scales(1)
-    cxx.change_scales(1)
-    cxy.change_scales(1)
-    cyy.change_scales(1)
-
-    tr = cxx['g'] + cyy['g']
-    det = cxx['g'] * cyy['g'] - cxy['g']**2
-    usq = u['g'][0]**2 + u['g'][1]**2
-
-    tr_max = mpi_max(np.max(tr))
-    tr_min = mpi_min(np.min(tr))
-    det_min = mpi_min(np.min(det))
-    umax = mpi_max(np.sqrt(np.max(usq)))
-    cxy_abs_max = mpi_max(np.max(np.abs(cxy['g'])))
-
-    return tr_max, tr_min, det_min, umax, cxy_abs_max
-
 
 def check_finite_state():
     bad = []
@@ -496,7 +515,8 @@ def check_finite_state():
 # Loop
 # =============================================================
 it = 0
-detector = SteadyStateDetector(threshold=1e-8, duration=10.0)
+detector = SteadyStateDetector(threshold=1e-10, duration=10.0)
+steady_state_reached = False
 
 while stokes_solver.proceed and csolver.proceed:
 
@@ -506,31 +526,42 @@ while stokes_solver.proceed and csolver.proceed:
     csolver.step(dt_step)
 
     it += 1
-    t = csolver.sim_time
+    t = csolver.sim_time    
 
-    # ---- stats + energy EVERY step----
-    E = compute_kinetic_energy()
+    # ---- NaN check ----
+    if it % 50 == 0:
+        if any_nonfinite(u, p, cxx, cxy, cyy):
+            if rank == 0:
+                print(f"[ERROR] Non-finite detected at it={it}, t={t:.6e}")
+            break
 
     # ---- monitor ----
     if it % 100 == 0:
-
+        E = compute_kinetic_energy()
         tr_max, tr_min, det_min, umax, cxy_abs_max = monitor_stats()
+        cxx_norm, cxy_norm, cyy_norm, cxx_max, cxy_max, cyy_max = monitor_tensor_stats()
 
         if rank == 0:
             print(
-                f"[STAT] it={it:5d} t={t:.5f} "
-                f"E={E:.6e} "
-                f"min(detC)={det_min:.6e}"
+                f"[STAT] it={it:5d} t={t:.4f} "
+                f"E={E:.3e} "
+                f"tr=[{tr_min:.2e},{tr_max:.2e}] "
+                f"det_min={det_min:.2e} "
+                f"u_max={umax:.2e} "
+                f"cxy_max={cxy_abs_max:.2e}"
             )
+            print(f"||cxx||_2 = {cxx_norm:.6e}   max(cxx) = {cxx_max:.6e}")
+            print(f"||cxy||_2 = {cxy_norm:.6e}   max(cxy) = {cxy_max:.6e}")
+            print(f"||cyy||_2 = {cyy_norm:.6e}   max(cyy) = {cyy_max:.6e}")
 
-    # ---- steady check----
-    if detector.update(E, t):
-        if rank == 0:
-            print(f"[STOP] Steady state reached at t={t:.6f}")
-        break
+        # ---- steady check----
+        if not steady_state_reached and detector.update(E, t):
+            steady_state_reached = True
+            if rank == 0:
+                print(f"[INFO] Steady state reached at t={t:.6f}")
+        
 # =============================================================
 # Done
 # =============================================================
 if rank == 0:
->>>>>>> adb0d04 (steady state detection and updates)
     print("DONE")
